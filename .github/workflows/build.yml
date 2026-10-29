@@ -100,8 +100,13 @@ jobs:
       # Tiger to answer, and fails the build if it does not — the "render it, or it isn't tested"
       # rule applied to a container.
       - name: Smoke test (amd64)
+        env:
+          ADMIN_EMAIL: admin@example.com
+          ADMIN_PW: smoke-test-password-9173
         run: |
           docker run -d --name tiger-smoke -p 8080:80 \
+            -e TIGER_ADMIN_EMAIL="${ADMIN_EMAIL}" \
+            -e TIGER_ADMIN_PASSWORD="${ADMIN_PW}" \
             ghcr.io/webtigers/tiger:${{ steps.bundle.outputs.version }}
           # First run downloads the bundle, extracts it and runs the whole migration chain, so give
           # it room. Progress is printed as it goes — a smoke test that only says "failed" after
@@ -121,4 +126,33 @@ jobs:
           echo "=== container log ==="
           docker logs tiger-smoke 2>&1 | tail -60
           if [ "${ok:-0}" != "1" ]; then echo "::error::Tiger never answered 200"; exit 1; fi
-          curl -s -o /dev/null -w 'admin: %{http_code}\n' http://localhost:8080/admin
+
+          # Serving a page is not the same as being usable. A stale bundle once produced installs
+          # that rendered the sign-in form perfectly and rejected every login — which a 200-on-/
+          # check passes happily. So actually sign in, with the credentials the install created.
+          echo "=== signing in as ${ADMIN_EMAIL} ==="
+          code=$(curl -s -c /tmp/jar -o /tmp/login.json -w '%{http_code}' \
+            -X POST http://localhost:8080/auth/login \
+            -H 'Accept: application/json' \
+            -H 'X-Requested-With: XMLHttpRequest' \
+            --data-urlencode "identifier=${ADMIN_EMAIL}" \
+            --data-urlencode "password=${ADMIN_PW}")
+          echo "  POST /auth/login -> HTTP ${code}"
+          echo "  body: $(head -c 400 /tmp/login.json)"
+
+          if ! grep -q '"result":1' /tmp/login.json; then
+            echo "::error::login failed — the install is not usable"
+            docker logs tiger-smoke 2>&1 | tail -30
+            exit 1
+          fi
+
+          # And that the session is real: /admin must now render rather than bounce to sign-in.
+          admin=$(curl -s -b /tmp/jar -o /tmp/admin.html -w '%{http_code}' http://localhost:8080/admin)
+          echo "  GET /admin (signed in) -> HTTP ${admin}"
+          if [ "${admin}" != "200" ]; then
+            echo "::error::signed in, but /admin did not render (HTTP ${admin})"
+            exit 1
+          fi
+          echo "  admin page title: $(grep -o '<title>[^<]*' /tmp/admin.html | head -1)"
+          echo "LOGIN OK — a user can sign in to this image"
+
