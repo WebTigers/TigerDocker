@@ -25,23 +25,41 @@ if [ ! -d "${DATADIR}/mysql" ]; then
     mariadb-install-db --user=mysql --datadir="${DATADIR}" --auth-root-authentication-method=socket >/dev/null
 fi
 
-log "starting MariaDB"
-mysqld_safe --datadir="${DATADIR}" --skip-networking=0 --bind-address=127.0.0.1 >/dev/null 2>&1 &
+# Keep the server's own output — when it refuses to start, its log is the only thing that says
+# why, and a container that dies silently is a container nobody can debug from CI logs.
+SERVER_LOG=/var/log/tiger-mariadb.log
+SERVER_BIN=mariadbd-safe
+command -v "${SERVER_BIN}" >/dev/null 2>&1 || SERVER_BIN=mysqld_safe
 
+log "starting MariaDB (${SERVER_BIN})"
+"${SERVER_BIN}" --datadir="${DATADIR}" --user=mysql --bind-address=127.0.0.1 >"${SERVER_LOG}" 2>&1 &
+
+up=0
 for _ in $(seq 1 60); do
-    if mariadb-admin ping --silent 2>/dev/null; then break; fi
+    if mariadb-admin ping >/dev/null 2>&1; then up=1; break; fi
     sleep 1
 done
-if ! mariadb-admin ping --silent 2>/dev/null; then
-    log "FATAL: MariaDB did not come up"; exit 1
+if [ "${up}" != "1" ]; then
+    log "FATAL: MariaDB did not come up — its log follows"
+    tail -40 "${SERVER_LOG}" >&2 || true
+    tail -40 /var/log/mysql/error.log >&2 2>/dev/null || true
+    exit 1
 fi
+log "MariaDB is up"
 
-mariadb -u root <<SQL
+log "ensuring database and user"
+if ! mariadb -u root <<SQL
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
 GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';
 FLUSH PRIVILEGES;
 SQL
+then
+    log "FATAL: could not create the database or user — MariaDB said:"
+    tail -20 "${SERVER_LOG}" >&2 || true
+    exit 1
+fi
+log "database ${DB_NAME} ready"
 
 # ---------------------------------------------------------------- install
 # A password nobody chose is generated once and surfaced once — the same handoff the web installer
@@ -75,7 +93,9 @@ if (($v = getenv("TIGER_VERSION")) !== false && $v !== "") { $spec["source"] = [
 echo json_encode($spec);
 ')
 
-log "running the install engine (it adopts an existing install)"
+log "building the install spec"
+: "${SPEC:?spec generation produced nothing}"
+log "running the install engine (it adopts an existing install) — this can take a few minutes on first run"
 set +e
 RESULT=$(printf '%s' "${SPEC}" | runuser -u www-data -- php /opt/tiger-headless/bin/tiger-headless install --spec=- 2>/tmp/headless.err)
 CODE=$?

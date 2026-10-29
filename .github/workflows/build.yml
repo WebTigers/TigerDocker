@@ -78,11 +78,22 @@ jobs:
         run: |
           docker run -d --name tiger-smoke -p 8080:80 \
             ghcr.io/webtigers/tiger:${{ steps.bundle.outputs.version }}
-          for i in $(seq 1 90); do
+          # First run downloads the bundle, extracts it and runs the whole migration chain, so give
+          # it room. Progress is printed as it goes — a smoke test that only says "failed" after
+          # five minutes of silence is barely better than no smoke test.
+          for i in $(seq 1 300); do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/ || true)
             if [ "$code" = "200" ]; then echo "Tiger answered 200 after ${i}s"; ok=1; break; fi
+            if [ $((i % 30)) -eq 0 ]; then
+              echo "--- ${i}s, still waiting (last code: ${code}) ---"
+              docker logs tiger-smoke 2>&1 | tail -5
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' tiger-smoke 2>/dev/null)" != "true" ]; then
+              echo "::error::the container exited"; break
+            fi
             sleep 1
           done
-          docker logs tiger-smoke | tail -40
+          echo "=== container log ==="
+          docker logs tiger-smoke 2>&1 | tail -60
           if [ "${ok:-0}" != "1" ]; then echo "::error::Tiger never answered 200"; exit 1; fi
           curl -s -o /dev/null -w 'admin: %{http_code}\n' http://localhost:8080/admin
