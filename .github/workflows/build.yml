@@ -27,6 +27,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Docker Hub is optional: until the credentials exist the build still runs and still publishes
+    # to GHCR. A missing secret should not break the build, it should just publish one registry.
+    env:
+      HAS_HUB: ${{ secrets.DOCKERHUB_TOKEN != '' && secrets.DOCKERHUB_USERNAME != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -51,6 +55,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        if: env.HAS_HUB == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Work out the tags
+        id: tags
+        env:
+          VERSION: ${{ steps.bundle.outputs.version }}
+        run: |
+          tags="ghcr.io/webtigers/tiger:${VERSION},ghcr.io/webtigers/tiger:latest"
+          if [ "${HAS_HUB}" = "true" ]; then
+            tags="${tags},docker.io/${{ secrets.DOCKERHUB_USERNAME }}/tiger:${VERSION}"
+            tags="${tags},docker.io/${{ secrets.DOCKERHUB_USERNAME }}/tiger:latest"
+            echo "publishing to GHCR and Docker Hub"
+          else
+            echo "publishing to GHCR only (no Docker Hub credentials configured)"
+          fi
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -59,9 +86,7 @@ jobs:
           push: true
           build-args: |
             TIGER_VERSION=${{ steps.bundle.outputs.tag }}
-          tags: |
-            ghcr.io/webtigers/tiger:${{ steps.bundle.outputs.version }}
-            ghcr.io/webtigers/tiger:latest
+          tags: ${{ steps.tags.outputs.tags }}
           labels: |
             org.opencontainers.image.title=Tiger (evaluation)
             org.opencontainers.image.description=Run Tiger on your desktop to try it out. Not for production.
