@@ -91,6 +91,11 @@ $spec = [
     "site"   => ["url" => getenv("TIGER_SITE_URL"), "name" => getenv("TIGER_SITE_NAME")],
     "admin"  => ["email" => getenv("TIGER_ADMIN_EMAIL"), "password" => getenv("TIGER_ADMIN_PASSWORD")],
     "locale" => getenv("TIGER_LOCALE") ?: "en",
+    // No modules. The spec would otherwise default to ["comingsoon"], which stands up a holding
+    // page that answers every public URL with 200 — right for a real site going live, exactly
+    // wrong here, where the whole point is to look at Tiger. Passing an explicit list is an
+    // ordinary use of the spec, not a special install.
+    "modules" => [],
 ];
 if (($v = getenv("TIGER_VERSION")) !== false && $v !== "") { $spec["source"] = ["version" => $v]; }
 echo json_encode($spec);

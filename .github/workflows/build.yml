@@ -127,6 +127,16 @@ jobs:
           docker logs tiger-smoke 2>&1 | tail -60
           if [ "${ok:-0}" != "1" ]; then echo "::error::Tiger never answered 200"; exit 1; fi
 
+          # A 200 is not proof Tiger is what answered. The ComingSoon holding page returns 200 for
+          # every public URL, and for several builds that is exactly what this test was passing on.
+          curl -s -o /tmp/home.html http://localhost:8080/
+          if grep -q 'data-cs-skin' /tmp/home.html; then
+            echo "::error::the ComingSoon holding page is serving, not Tiger"
+            grep -o '<title>[^<]*' /tmp/home.html | head -1
+            exit 1
+          fi
+          echo "HOME OK — Tiger is serving, not a holding page"
+
           # Serving a page is not the same as being usable. A stale bundle once produced installs
           # that rendered the sign-in form perfectly and rejected every login — which a 200-on-/
           # check passes happily. So actually sign in, with the credentials the install created.
