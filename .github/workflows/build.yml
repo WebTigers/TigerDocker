@@ -164,13 +164,9 @@ jobs:
           # exactly as a browser would.
           curl -s -b /tmp/jar -o /tmp/form.html -w '  GET /cms/page/edit -> %{http_code}\n' \
             http://localhost:8080/cms/page/edit
-          CSRF=$(python3 - <<'EOF'
-import re
-h = open('/tmp/form.html', encoding='utf-8', errors='replace').read()
-m = re.search(r'<input[^>]*name="_csrf"[^>]*>', h, re.I) or re.search(r'<input[^>]*_csrf[^>]*>', h, re.I)
-print(re.search(r'value="([^"]*)"', m.group(0)).group(1) if m else '')
-EOF
-)
+          # Split tags onto lines, find the one carrying _csrf, take its value. Attribute order
+          # is not guaranteed, so match on the tag rather than on a fixed attribute sequence.
+          CSRF=$(tr '>' '\n' < /tmp/form.html | grep '_csrf' | grep -o 'value="[^"]*"' | head -1 | cut -d'"' -f2)
           if [ -z "${CSRF}" ]; then
             echo "::error::no _csrf token in /cms/page/edit — cannot submit the form"
             grep -o '<title>[^<]*' /tmp/form.html | head -1
