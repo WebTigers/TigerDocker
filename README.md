@@ -3,7 +3,7 @@
 Run Tiger on your desktop to try it out. One command, no hosting account.
 
 ```bash
-docker run -p 8080:80 webtigerscom/tiger
+docker run -p 8080:80 ghcr.io/webtigers/tiger
 ```
 
 Then open **http://localhost:8080**. The admin sign-in and a generated password are printed in the
@@ -44,8 +44,11 @@ docker run -p 3000:80 \
   -e TIGER_SITE_URL=http://localhost:3000 \
   -e TIGER_ADMIN_EMAIL=you@example.com \
   -e TIGER_ADMIN_PASSWORD=choose-your-own \
-  webtigerscom/tiger
+  ghcr.io/webtigers/tiger
 ```
+
+> Also published to Docker Hub as `webtigerscom/tiger`, where the shorter
+> `docker run -p 8080:80 webtigerscom/tiger` works.
 
 ## Licence
 
