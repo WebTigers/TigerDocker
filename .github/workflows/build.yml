@@ -227,22 +227,47 @@ jobs:
           fi
           echo "PAGE OK — created through the API and serving"
 
-          # Module assets must be LINKED, not copied. With links an update is picked up for free;
-          # with copies the browser keeps serving yesterday's asset and nobody notices for weeks.
-          echo "=== module assets are symlinks ==="
+          # Fetch every stylesheet and script the pages actually reference. Counting symlinks on disk
+          # was the old check, and it passed an image that served NO CSS AT ALL: it counted _modules,
+          # while _theme and _tiger — which is where every stylesheet lives — were never published.
+          # A browser does not read the filesystem, so neither does this gate.
+          echo "=== referenced assets are served ==="
+          urls=$(for page in / /auth/login; do
+                   curl -s "http://localhost:8080${page}"
+                 done | grep -Eo '(href|src)="/_[^"]+"' | cut -d'"' -f2 | sort -u || true)
+          [ -n "${urls}" ] || { echo "::error::no /_* assets referenced — the pages render without any"; exit 1; }
+          bad=0; n=0
+          for u in ${urls}; do
+            n=$((n+1))
+            # One field, split after the fact: `read` returns non-zero at EOF on output with no
+            # trailing newline, and under the runner's `set -e` that alone would kill the step.
+            got=$(curl -s -o /dev/null -w '%{http_code}|%{content_type}' "http://localhost:8080${u}")
+            code=${got%%|*}; ctype=${got#*|}
+            case "${code}:${ctype}" in
+              200:text/css*|200:text/javascript*|200:application/javascript*|200:image/*|200:font/*|200:application/font*)
+                ;;
+              *)
+                echo "  FAIL ${u} -> ${code} ${ctype}"; bad=$((bad+1)) ;;
+            esac
+          done
+          echo "  ${n} referenced, $((n-bad)) served"
+          [ "${bad}" -eq 0 ] || { echo "::error::${bad} of ${n} referenced assets do not serve"; exit 1; }
+
+          # And they must be LINKED, not copied: with links an update is picked up for free; with
+          # copies the browser keeps serving yesterday's asset and nobody notices for weeks.
           docker exec tiger-smoke bash -c '
-            d=/var/www/tiger/public/_modules
-            [ -d "$d" ] || { echo "::error::$d does not exist"; exit 1; }
+            cd /var/www/tiger/public || exit 1
+            miss=""
+            for d in _tiger _theme _modules; do [ -e "$d" ] || miss="$miss $d"; done
+            [ -z "$miss" ] || { echo "::error::not published:$miss"; exit 1; }
             total=0; links=0
-            for e in "$d"/*; do
+            for e in _tiger _theme _modules/*; do
               [ -e "$e" ] || continue
               total=$((total+1)); [ -L "$e" ] && links=$((links+1))
             done
             echo "  entries: $total | symlinks: $links"
-            ls -la "$d" | head -6
-            [ "$total" -gt 0 ]      || { echo "::error::no module assets published"; exit 1; }
             [ "$links" -eq "$total" ] || { echo "::error::$((total-links)) published as copies, not links"; exit 1; }
-            echo "ASSETS OK — all $links published as symlinks"
           '
+          echo "ASSETS OK — every referenced asset serves, and all are symlinks"
 
 

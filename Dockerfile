@@ -40,7 +40,7 @@ RUN set -eux; \
 
 # tiger-headless is not on Packagist and needs no composer — bin/tiger-headless requires its own
 # src/autoload.php. Pinned by tag so an image rebuild cannot silently change the install engine.
-ARG HEADLESS_REF=v1.4.0
+ARG HEADLESS_REF=v1.4.1
 RUN set -eux; \
     curl -fsSL "https://codeload.github.com/WebTigers/TigerHeadless/tar.gz/refs/tags/${HEADLESS_REF}" -o /tmp/headless.tar.gz; \
     mkdir -p /opt/tiger-headless; \
