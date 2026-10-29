@@ -191,7 +191,7 @@ jobs:
             --data-urlencode "title=Smoke Test Page" --data-urlencode "slug=smoke-test" \
             --data-urlencode "type=page" --data-urlencode "format=html" \
             --data-urlencode "status=published" --data-urlencode "locale=en" \
-            --data-urlencode "content=<h1>Created by the smoke test</h1>"
+            --data-urlencode "body=<h1>Created by the smoke test</h1>"
           echo "  body: $(head -c 300 /tmp/page.json)"
           if ! grep -q '"result":1' /tmp/page.json; then
             echo "::error::could not create a CMS page"; exit 1
