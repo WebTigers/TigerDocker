@@ -159,9 +159,28 @@ jobs:
           # Signing in is not the same as being able to do anything. Create a CMS page through the
           # same /api the admin UI uses, then fetch it: saved-but-not-served is a real failure mode.
           echo "=== creating a CMS page ==="
+          # /api is CSRF-protected with a per-form, timeout-lived _csrf token (Tiger_Form_Element_Hash),
+          # so the token has to come from the very form being submitted — fetch the editor first,
+          # exactly as a browser would.
+          curl -s -b /tmp/jar -o /tmp/form.html -w '  GET /cms/page/edit -> %{http_code}\n' \
+            http://localhost:8080/cms/page/edit
+          CSRF=$(python3 - <<'EOF'
+import re
+h = open('/tmp/form.html', encoding='utf-8', errors='replace').read()
+m = re.search(r'<input[^>]*name="_csrf"[^>]*>', h, re.I) or re.search(r'<input[^>]*_csrf[^>]*>', h, re.I)
+print(re.search(r'value="([^"]*)"', m.group(0)).group(1) if m else '')
+EOF
+)
+          if [ -z "${CSRF}" ]; then
+            echo "::error::no _csrf token in /cms/page/edit — cannot submit the form"
+            grep -o '<title>[^<]*' /tmp/form.html | head -1
+            exit 1
+          fi
+          echo "  _csrf token: ${#CSRF} chars"
           curl -s -b /tmp/jar -o /tmp/page.json -w '  POST /api (cms.page.save) -> %{http_code}\n' \
             -X POST http://localhost:8080/api \
             -H 'X-Requested-With: XMLHttpRequest' \
+            --data-urlencode "_csrf=${CSRF}" \
             --data-urlencode "module=cms" --data-urlencode "service=page" --data-urlencode "method=save" \
             --data-urlencode "title=Smoke Test Page" --data-urlencode "slug=smoke-test" \
             --data-urlencode "type=page" --data-urlencode "format=html" \
