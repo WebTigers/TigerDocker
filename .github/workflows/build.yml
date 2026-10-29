@@ -156,3 +156,44 @@ jobs:
           echo "  admin page title: $(grep -o '<title>[^<]*' /tmp/admin.html | head -1)"
           echo "LOGIN OK — a user can sign in to this image"
 
+          # Signing in is not the same as being able to do anything. Create a CMS page through the
+          # same /api the admin UI uses, then fetch it: saved-but-not-served is a real failure mode.
+          echo "=== creating a CMS page ==="
+          curl -s -b /tmp/jar -o /tmp/page.json -w '  POST /api (cms.page.save) -> %{http_code}\n' \
+            -X POST http://localhost:8080/api \
+            -H 'X-Requested-With: XMLHttpRequest' \
+            --data-urlencode "module=cms" --data-urlencode "service=page" --data-urlencode "method=save" \
+            --data-urlencode "title=Smoke Test Page" --data-urlencode "slug=smoke-test" \
+            --data-urlencode "type=page" --data-urlencode "format=html" \
+            --data-urlencode "status=published" --data-urlencode "locale=en" \
+            --data-urlencode "content=<h1>Created by the smoke test</h1>"
+          echo "  body: $(head -c 300 /tmp/page.json)"
+          if ! grep -q '"result":1' /tmp/page.json; then
+            echo "::error::could not create a CMS page"; exit 1
+          fi
+          served=$(curl -s -o /tmp/served.html -w '%{http_code}' http://localhost:8080/smoke-test)
+          echo "  GET /smoke-test -> HTTP ${served}"
+          if [ "${served}" != "200" ] || ! grep -q "Created by the smoke test" /tmp/served.html; then
+            echo "::error::the page saved but does not serve"; exit 1
+          fi
+          echo "PAGE OK — created through the API and serving"
+
+          # Module assets must be LINKED, not copied. With links an update is picked up for free;
+          # with copies the browser keeps serving yesterday's asset and nobody notices for weeks.
+          echo "=== module assets are symlinks ==="
+          docker exec tiger-smoke bash -c '
+            d=/var/www/tiger/public/_modules
+            [ -d "$d" ] || { echo "::error::$d does not exist"; exit 1; }
+            total=0; links=0
+            for e in "$d"/*; do
+              [ -e "$e" ] || continue
+              total=$((total+1)); [ -L "$e" ] && links=$((links+1))
+            done
+            echo "  entries: $total | symlinks: $links"
+            ls -la "$d" | head -6
+            [ "$total" -gt 0 ]      || { echo "::error::no module assets published"; exit 1; }
+            [ "$links" -eq "$total" ] || { echo "::error::$((total-links)) published as copies, not links"; exit 1; }
+            echo "ASSETS OK — all $links published as symlinks"
+          '
+
+
