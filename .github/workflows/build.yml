@@ -189,7 +189,14 @@ jobs:
           served=$(curl -s -o /tmp/served.html -w '%{http_code}' http://localhost:8080/smoke-test)
           echo "  GET /smoke-test -> HTTP ${served}"
           if [ "${served}" != "200" ] || ! grep -q "Created by the smoke test" /tmp/served.html; then
-            echo "::error::the page saved but does not serve"; exit 1
+            echo "::error::the page saved but does not serve"
+            echo "  what / serves         : $(curl -s http://localhost:8080/ | grep -o '<title>[^<]*' | head -1)"
+            echo "  what /smoke-test serves: $(grep -o '<title>[^<]*' /tmp/served.html | head -1)"
+            echo "  first 300 bytes of /smoke-test:"
+            head -c 300 /tmp/served.html; echo
+            echo "  active modules:"
+            docker exec tiger-smoke bash -c "cd /var/www/tiger && runuser -u www-data -- php vendor/bin/tiger module:list 2>/dev/null | head -20" || true
+            exit 1
           fi
           echo "PAGE OK — created through the API and serving"
 
