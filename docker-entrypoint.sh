@@ -135,29 +135,12 @@ fi
 # runs the container and sees a white screen that reads as broken. Seeded only on a fresh install;
 # an adopted one keeps whatever its owner put there.
 if [ "${ALREADY}" != "yes" ]; then
-    runuser -u www-data -- php -r '
-        define("APPLICATION_ROOT", getenv("TIGER_APP_ROOT") ?: "/var/www/tiger");
-        require APPLICATION_ROOT . "/vendor/autoload.php";
-        (new Tiger_Application(APPLICATION_ROOT))->boot();
-        $pages = new Tiger_Model_Page();
-        if ($pages->resolveBySlug("welcome", null, null, Tiger_Model_Page::TYPE_PAGE)) { exit(0); }
-        $url  = getenv("TIGER_SITE_URL") ?: "http://localhost:8080";
-        $body = "<div class="container py-5">"
-              . "<h1 class="fw-bold mb-3">Tiger is running.</h1>"
-              . "<p class="lead text-secondary mb-4">This is a real Tiger install in a container — "
-              . "the same framework that runs on a VPS or a shared host, not a demo.</p>"
-              . "<p class="mb-4"><a class="btn btn-primary btn-lg" href="/admin">Open the Dashboard</a></p>"
-              . "<p class="text-secondary mb-0">Edit or replace this page in the Dashboard under "
-              . "<strong>Content &rsaquo; Pages</strong>. For a one-time sign-in link, run "
-              . "<code>docker exec &lt;container&gt; tiger-login</code>.</p></div>";
-        $row = $pages->createRow([
-            "page_id" => Tiger_Uuid::v7(), "slug" => "welcome", "page_key" => "welcome",
-            "title" => "Welcome", "type" => "page", "format" => "html",
-            "status" => "published", "locale" => "en", "body" => $body,
-        ]);
-        $row->save();
-        (new Tiger_Model_Config())->set(Tiger_Model_Config::SCOPE_GLOBAL, "", "tiger.cms.home_page", (string) $row->page_id);
-    ' 2>/tmp/seed.err && log "seeded the welcome home page" || { log "could not seed the home page (not fatal):"; head -5 /tmp/seed.err >&2; }
+    if runuser -u www-data -- php /usr/local/lib/tiger-seed-home.php >/tmp/seed.out 2>&1; then
+        log "$(cat /tmp/seed.out)"
+    else
+        log "could not seed the home page (not fatal) — it said:"
+        sed -n '1,12p' /tmp/seed.out >&2
+    fi
 fi
 
 # ---------------------------------------------------------------- banner

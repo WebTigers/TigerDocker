@@ -62,6 +62,7 @@ ENV TIGER_APP_ROOT=/var/www/tiger \
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY tiger-login /usr/local/bin/tiger-login
+COPY seed-home.php /usr/local/lib/tiger-seed-home.php
 COPY AGENTS.md /AGENTS.md
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/tiger-login
 
