@@ -69,7 +69,10 @@ if [ -z "${TIGER_ADMIN_PASSWORD}" ]; then
     if [ -f "${PASSWORD_FILE}" ]; then
         TIGER_ADMIN_PASSWORD="$(cat "${PASSWORD_FILE}")"
     else
-        TIGER_ADMIN_PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)"
+        # NOT `tr -dc ... </dev/urandom | head -c 20`: under `set -o pipefail` head exits after
+        # 20 bytes, tr takes SIGPIPE and returns 141, the pipeline "fails" and set -e kills the
+        # script with nothing in the log. PHP is already here and needs no pipeline.
+        TIGER_ADMIN_PASSWORD="$(php -r 'echo bin2hex(random_bytes(10));')"
         GENERATED=1
     fi
 fi
@@ -93,8 +96,8 @@ if (($v = getenv("TIGER_VERSION")) !== false && $v !== "") { $spec["source"] = [
 echo json_encode($spec);
 ')
 
-log "building the install spec"
 : "${SPEC:?spec generation produced nothing}"
+log "install spec built"
 log "running the install engine (it adopts an existing install) — this can take a few minutes on first run"
 set +e
 RESULT=$(printf '%s' "${SPEC}" | runuser -u www-data -- php /opt/tiger-headless/bin/tiger-headless install --spec=- 2>/tmp/headless.err)
