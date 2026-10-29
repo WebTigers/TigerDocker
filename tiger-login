@@ -1,0 +1,29 @@
+#!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026 WebTigers. Tiger™ and WebTigers™ are trademarks of WebTigers.
+#
+# Print a one-time sign-in URL for the site's admin. The link lands you in the Dashboard already
+# signed in, so nobody has to find a password to look at Tiger.
+#
+#   docker exec <container> tiger-login
+#
+# Magic links last two minutes by design (long enough to click, not to forward), so this mints a
+# fresh one each time rather than reusing the one printed at boot.
+set -euo pipefail
+
+APP_ROOT="${TIGER_APP_ROOT:-/var/www/tiger}"
+BASE="${TIGER_SITE_URL:-http://localhost:8080}"
+
+OUT=$(runuser -u www-data -- php /opt/tiger-headless/bin/tiger-headless login --app-root="${APP_ROOT}" 2>/dev/null)
+PATH_=$(printf '%s' "${OUT}" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo $d["path"] ?? "";')
+TTL=$(printf '%s' "${OUT}" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo $d["expires_in"] ?? "";')
+
+if [ -z "${PATH_}" ]; then
+    echo "Could not issue a sign-in link:" >&2
+    printf '%s\n' "${OUT}" >&2
+    exit 1
+fi
+
+printf '%s%s\n' "${BASE}" "${PATH_}"
+[ -n "${TTL}" ] && printf '(valid for %s seconds — run this again for a fresh one)\n' "${TTL}" >&2
+exit 0

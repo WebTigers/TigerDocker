@@ -135,7 +135,24 @@ jobs:
             grep -o '<title>[^<]*' /tmp/home.html | head -1
             exit 1
           fi
-          echo "HOME OK — Tiger is serving, not a holding page"
+          if ! grep -q 'Tiger is running' /tmp/home.html; then
+            echo "::error::the home page is blank — an evaluator sees a white screen"
+            echo "  body: $(sed -n 's/.*<main[^>]*>\(.*\)<\/main>.*/\1/p' /tmp/home.html | head -c 200)"
+            exit 1
+          fi
+          echo "HOME OK — Tiger is serving a real page, not a holding page or a blank canvas"
+
+          # The evaluator has to be able to get in. A one-time link beats a password they must carry.
+          echo "=== one-time sign-in link ==="
+          MAGIC=$(docker exec tiger-smoke tiger-login 2>/dev/null || true)
+          if [ -z "${MAGIC}" ]; then echo "::error::tiger-login issued no link"; exit 1; fi
+          echo "  ${MAGIC%%/auth/magic*}/auth/magic/... (${#MAGIC} chars)"
+          mcode=$(curl -s -c /tmp/mjar -o /tmp/magic.html -w '%{http_code}' -L "${MAGIC}")
+          echo "  following it -> HTTP ${mcode}  $(grep -o '<title>[^<]*' /tmp/magic.html | head -1)"
+          if ! grep -qi 'Tiger Admin' /tmp/magic.html; then
+            echo "::error::the magic link did not land in the Dashboard"; exit 1
+          fi
+          echo "MAGIC OK — the link signs you straight into the Dashboard"
 
           # Serving a page is not the same as being usable. A stale bundle once produced installs
           # that rendered the sign-in form perfectly and rejected every login — which a 200-on-/

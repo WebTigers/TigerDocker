@@ -129,15 +129,56 @@ else
     log "installed Tiger ${VERSION}"
 fi
 
+# ---------------------------------------------------------------- first-run content
+# Bare core serves a BLANK home by design — <main> with nothing in it. ComingSoon normally covers
+# that gap and this image deliberately does not install it, so without something here an evaluator
+# runs the container and sees a white screen that reads as broken. Seeded only on a fresh install;
+# an adopted one keeps whatever its owner put there.
+if [ "${ALREADY}" != "yes" ]; then
+    runuser -u www-data -- php -r '
+        define("APPLICATION_ROOT", getenv("TIGER_APP_ROOT") ?: "/var/www/tiger");
+        require APPLICATION_ROOT . "/vendor/autoload.php";
+        (new Tiger_Application(APPLICATION_ROOT))->boot();
+        $pages = new Tiger_Model_Page();
+        if ($pages->resolveBySlug("welcome", null, null, Tiger_Model_Page::TYPE_PAGE)) { exit(0); }
+        $url  = getenv("TIGER_SITE_URL") ?: "http://localhost:8080";
+        $body = "<div class="container py-5">"
+              . "<h1 class="fw-bold mb-3">Tiger is running.</h1>"
+              . "<p class="lead text-secondary mb-4">This is a real Tiger install in a container — "
+              . "the same framework that runs on a VPS or a shared host, not a demo.</p>"
+              . "<p class="mb-4"><a class="btn btn-primary btn-lg" href="/admin">Open the Dashboard</a></p>"
+              . "<p class="text-secondary mb-0">Edit or replace this page in the Dashboard under "
+              . "<strong>Content &rsaquo; Pages</strong>. For a one-time sign-in link, run "
+              . "<code>docker exec &lt;container&gt; tiger-login</code>.</p></div>";
+        $row = $pages->createRow([
+            "page_id" => Tiger_Uuid::v7(), "slug" => "welcome", "page_key" => "welcome",
+            "title" => "Welcome", "type" => "page", "format" => "html",
+            "status" => "published", "locale" => "en", "body" => $body,
+        ]);
+        $row->save();
+        (new Tiger_Model_Config())->set(Tiger_Model_Config::SCOPE_GLOBAL, "", "tiger.cms.home_page", (string) $row->page_id);
+    ' 2>/tmp/seed.err && log "seeded the welcome home page" || { log "could not seed the home page (not fatal):"; head -5 /tmp/seed.err >&2; }
+fi
+
 # ---------------------------------------------------------------- banner
+# A link that drops the evaluator straight into the Dashboard beats a password they have to carry.
+# Two-minute life is fine here: it is printed the moment they run the container and they are
+# looking at the terminal. tiger-login mints another whenever they want one.
+MAGIC_URL=$(tiger-login 2>/dev/null || true)
 # Said out loud because an agent driving docker on the desktop cannot otherwise know this image
 # carries its own data. `docker rm` on a container is usually routine cleanup; here it is not.
 cat >&2 <<BANNER
 
   Tiger is running — ${TIGER_SITE_URL}
-    admin:    ${TIGER_SITE_URL}/admin
-    sign in:  ${TIGER_ADMIN_EMAIL}
-    password: ${TIGER_ADMIN_PASSWORD}
+
+  Sign straight in (one-time link, valid ~2 minutes):
+    ${MAGIC_URL:-  run: docker exec <container> tiger-login}
+
+  Or sign in at ${TIGER_SITE_URL}/admin with:
+    ${TIGER_ADMIN_EMAIL}
+    ${TIGER_ADMIN_PASSWORD}
+
+  A fresh sign-in link any time:  docker exec <container> tiger-login
 
   This container holds your Tiger site — there is no volume.
     docker stop / docker start   safe, your site is preserved

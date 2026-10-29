@@ -61,8 +61,9 @@ ENV TIGER_APP_ROOT=/var/www/tiger \
     TIGER_LOCALE=en
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY tiger-login /usr/local/bin/tiger-login
 COPY AGENTS.md /AGENTS.md
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/tiger-login
 
 EXPOSE 80
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
