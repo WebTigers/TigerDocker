@@ -1,0 +1,88 @@
+# Build the Tiger evaluation image and push it to GHCR.
+#
+# amd64 is native; arm64 is emulated through QEMU, which is slow but needs no special runner.
+# If the build time becomes annoying, split arm64 onto a native `ubuntu-24.04-arm` runner — they
+# are free for public repositories.
+name: Build image
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      bundle:
+        description: "WebTigers/Tiger release to install (blank = newest)"
+        required: false
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Which bundle goes in. Pinned explicitly so the image is reproducible and so the tag we
+      # publish describes what is actually inside it, rather than "whatever was newest that day".
+      - name: Resolve the Tiger bundle
+        id: bundle
+        run: |
+          tag="${{ github.event.inputs.bundle }}"
+          if [ -z "$tag" ]; then
+            tag=$(curl -fsSL https://api.github.com/repos/WebTigers/Tiger/releases/latest | jq -r .tag_name)
+          fi
+          echo "tag=$tag"               >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}"       >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            TIGER_VERSION=${{ steps.bundle.outputs.tag }}
+          tags: |
+            ghcr.io/webtigers/tiger:${{ steps.bundle.outputs.version }}
+            ghcr.io/webtigers/tiger:latest
+          labels: |
+            org.opencontainers.image.title=Tiger (evaluation)
+            org.opencontainers.image.description=Run Tiger on your desktop to try it out. Not for production.
+            org.opencontainers.image.source=https://github.com/WebTigers/TigerDocker
+            org.opencontainers.image.version=${{ steps.bundle.outputs.version }}
+            org.opencontainers.image.licenses=BSD-3-Clause
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The image is only worth publishing if it actually comes up. Runs the amd64 image, waits for
+      # Tiger to answer, and fails the build if it does not — the "render it, or it isn't tested"
+      # rule applied to a container.
+      - name: Smoke test (amd64)
+        run: |
+          docker run -d --name tiger-smoke -p 8080:80 \
+            ghcr.io/webtigers/tiger:${{ steps.bundle.outputs.version }}
+          for i in $(seq 1 90); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/ || true)
+            if [ "$code" = "200" ]; then echo "Tiger answered 200 after ${i}s"; ok=1; break; fi
+            sleep 1
+          done
+          docker logs tiger-smoke | tail -40
+          if [ "${ok:-0}" != "1" ]; then echo "::error::Tiger never answered 200"; exit 1; fi
+          curl -s -o /dev/null -w 'admin: %{http_code}\n' http://localhost:8080/admin
