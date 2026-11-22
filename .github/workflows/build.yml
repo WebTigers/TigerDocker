@@ -10,6 +10,10 @@ on:
     branches: [main]
   release:
     types: [published]
+  # Follow Tiger's releases: an hourly look at the newest WebTigers/Tiger release, building only when the
+  # registry has no image for it yet (the `check` job). Polling from here needs no cross-repo token.
+  schedule:
+    - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
       bundle:
@@ -25,7 +29,31 @@ permissions:
   packages: write
 
 jobs:
+  # Scheduled runs only build when Tiger has a release the registry doesn't carry yet; every other trigger
+  # (push, release, manual) always builds.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - id: decide
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then echo "build=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          tag=$(curl -fsSL https://api.github.com/repos/WebTigers/Tiger/releases/latest | jq -r .tag_name)
+          version="${tag#v}"
+          token=$(curl -fsSL "https://ghcr.io/token?scope=repository:webtigers/tiger:pull" | jq -r .token)
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${token}" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://ghcr.io/v2/webtigers/tiger/manifests/${version}")
+          if [ "$code" = "200" ]; then
+            echo "ghcr.io/webtigers/tiger:${version} already published — nothing to build"; echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tiger ${tag} has no image yet (HTTP ${code}) — building"; echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
     runs-on: ubuntu-latest
     # Docker Hub is optional: until the credentials exist the build still runs and still publishes
     # to GHCR. A missing secret should not break the build, it should just publish one registry.
@@ -78,21 +106,19 @@ jobs:
           fi
           echo "tags=${tags}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push
+      # Test BEFORE publishing: build the amd64 image into the runner's local Docker (no push), smoke-test
+      # that, and only then build + push both architectures (the amd64 layers come from the cache). A
+      # failing image never reaches the registries.
+      - name: Build for the smoke test (amd64, not pushed)
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
+          platforms: linux/amd64
+          load: true
+          push: false
           build-args: |
             TIGER_VERSION=${{ steps.bundle.outputs.tag }}
-          tags: ${{ steps.tags.outputs.tags }}
-          labels: |
-            org.opencontainers.image.title=Tiger (evaluation)
-            org.opencontainers.image.description=Run Tiger on your desktop to try it out. Not for production.
-            org.opencontainers.image.source=https://github.com/WebTigers/TigerDocker
-            org.opencontainers.image.version=${{ steps.bundle.outputs.version }}
-            org.opencontainers.image.licenses=BSD-3-Clause
+          tags: tiger-smoke:candidate
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -107,7 +133,7 @@ jobs:
           docker run -d --name tiger-smoke -p 8080:80 \
             -e TIGER_ADMIN_EMAIL="${ADMIN_EMAIL}" \
             -e TIGER_ADMIN_PASSWORD="${ADMIN_PW}" \
-            ghcr.io/webtigers/tiger:${{ steps.bundle.outputs.version }}
+            tiger-smoke:candidate
           # First run downloads the bundle, extracts it and runs the whole migration chain, so give
           # it room. Progress is printed as it goes — a smoke test that only says "failed" after
           # five minutes of silence is barely better than no smoke test.
@@ -273,3 +299,23 @@ jobs:
           echo "ASSETS OK — every referenced asset serves, and all are symlinks"
 
 
+
+      # Only reached when every smoke check above passed. Builds both architectures (amd64 from the
+      # cache the candidate build just filled) and publishes them under the version and `latest`.
+      - name: Publish (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            TIGER_VERSION=${{ steps.bundle.outputs.tag }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=Tiger (evaluation)
+            org.opencontainers.image.description=Run Tiger on your desktop to try it out. Not for production.
+            org.opencontainers.image.source=https://github.com/WebTigers/TigerDocker
+            org.opencontainers.image.version=${{ steps.bundle.outputs.version }}
+            org.opencontainers.image.licenses=BSD-3-Clause
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
