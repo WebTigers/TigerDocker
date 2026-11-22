@@ -191,9 +191,11 @@ jobs:
           # exactly as a browser would.
           curl -s -b /tmp/jar -o /tmp/form.html -w '  GET /cms/page/edit -> %{http_code}\n' \
             http://localhost:8080/cms/page/edit
-          # Split tags onto lines, find the one carrying _csrf, take its value. Attribute order
-          # is not guaranteed, so match on the tag rather than on a fixed attribute sequence.
-          CSRF=$(tr '>' '\n' < /tmp/form.html | grep '_csrf' | grep -o 'value="[^"]*"' | head -1 | cut -d'"' -f2)
+          # Take the token from INSIDE the editor's own form (#cms-page-form), as the browser does: the
+          # admin layout carries other forms with their own _csrf (the side navigation's, since core
+          # 1.63.0), so the first _csrf on the page is not this form's. Split tags onto lines, find the
+          # one carrying _csrf, take its value — attribute order is not guaranteed.
+          CSRF=$(sed -n '/id="cms-page-form"/,/<\/form>/p' /tmp/form.html | tr '>' '\n' | grep '_csrf' | grep -o 'value="[^"]*"' | head -1 | cut -d'"' -f2)
           if [ -z "${CSRF}" ]; then
             echo "::error::no _csrf token in /cms/page/edit — cannot submit the form"
             grep -o '<title>[^<]*' /tmp/form.html | head -1
